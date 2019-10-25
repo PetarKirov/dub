@@ -171,7 +171,7 @@ class ProjectGenerator
 	 */
 	private void configurePackages(Package rootPackage, TargetInfo[string] targets, GeneratorSettings genSettings)
 	{
-		import std.algorithm : remove, sort;
+		import std.algorithm : remove, sort, any;
 		import std.range : repeat;
 
 		// 0. do shallow configuration (not including dependencies) of all packages
@@ -383,36 +383,30 @@ class ProjectGenerator
 		}
 
 		// 5. override string import files in dependencies
-		static void overrideStringImports(ref TargetInfo ti, TargetInfo[string] targets, string[] overrides)
+		static void overrideStringImports(ref TargetInfo ti, TargetInfo* pti, TargetInfo[string] targets, string[] overrides)
 		{
 			// do not use visited here as string imports can be overridden by *any* parent
 			//
 			// special support for overriding string imports in parent packages
 			// this is a candidate for deprecation, once an alternative approach
 			// has been found
-			if (ti.buildSettings.stringImportPaths.length) {
+			if (pti && ti.buildSettings.stringImportPaths.length) {
 				// override string import files (used for up to date checking)
-				foreach (ref f; ti.buildSettings.stringImportFiles)
+				if (ti.buildSettings.stringImportFiles
+					.map!(f => NativePath(f).head)
+					.any!(f => overrides.any!(of => NativePath(of).head == f)))
 				{
-					foreach (o; overrides)
-					{
-						NativePath op;
-						if (f != o && NativePath(f).head == (op = NativePath(o)).head) {
-							logDebug("string import %s overridden by %s", f, o);
-							f = o;
-							ti.buildSettings.prependStringImportPaths(op.parentPath.toNativeString);
-						}
-					}
+					ti.buildSettings.prependStringImportPaths(pti.buildSettings.stringImportPaths);
 				}
 			}
 			// add to overrides for recursion
 			overrides ~= ti.buildSettings.stringImportFiles;
 			// override dependencies
 			foreach (depname; ti.dependencies)
-				overrideStringImports(targets[depname], targets, overrides);
+				overrideStringImports(targets[depname], &ti, targets, overrides);
 		}
 
-		overrideStringImports(targets[rootPackage.name], targets, null);
+		overrideStringImports(targets[rootPackage.name], null, targets, null);
 
 		// remove targets without output
 		foreach (name; targets.keys)
